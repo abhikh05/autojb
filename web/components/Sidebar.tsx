@@ -1,10 +1,11 @@
 'use client';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { LayoutDashboard, Search, Briefcase, Send, User, Settings, Sparkles, Radio, X } from 'lucide-react';
+import { LayoutDashboard, Search, Briefcase, Send, User, Settings, Sparkles, Radio, X, LogOut } from 'lucide-react';
 import { cn } from '@/lib/cn';
 import { useEffect } from 'react';
 import { useSidebar } from './SidebarState';
+import { api } from '@/lib/api';
 
 const NAV = [
   { href: '/', label: 'Dashboard', icon: LayoutDashboard },
@@ -78,7 +79,7 @@ export function Sidebar() {
           );
         })}
 
-        <div className="mt-auto pt-4">
+        <div className="mt-auto pt-4 space-y-2">
           <div className="glass px-3 py-3 rounded-xl">
             <div className="flex items-center gap-2 mb-1.5">
               <Radio className="w-3.5 h-3.5 text-neon" />
@@ -86,6 +87,15 @@ export function Sidebar() {
             </div>
             <div className="text-[11px] text-muted leading-snug">All adapters ready. Auto-apply engine armed.</div>
           </div>
+          <button
+            className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-[13px] text-muted2 hover:text-ink hover:bg-white/[0.04] border border-transparent hover:border-white/10 transition"
+            onClick={async () => {
+              try { await api('/api/logout', { method: 'POST' }); } catch {}
+              window.location.href = '/login';
+            }}
+          >
+            <LogOut className="w-4 h-4" /> Sign out
+          </button>
         </div>
       </aside>
     </>

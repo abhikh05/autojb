@@ -14,6 +14,7 @@ const { search: newSearch } = require('./search');
 const { applyATS, pickAdapter: pickATSAdapter } = require('./atsApply');
 const { tailor } = require('./tailor');
 const { scan: atsScan } = require('./atsScanner');
+const auth = require('./auth');
 const { scoreJobs } = require('./scorer');
 const { draftEmails } = require('./emailDrafter');
 const { sendEmail, testConnection } = require('./mailer');
@@ -61,6 +62,14 @@ function broadcast(event, data) {
 // ── Health (for Render / uptime probes) ─────────────────────
 app.get('/health', (req, res) => res.json({ ok: true, uptime: process.uptime() }));
 app.get('/api/health', (req, res) => res.json({ ok: true, uptime: process.uptime() }));
+
+// ── Auth (public endpoints) ─────────────────────────────────
+app.get('/api/auth/status', auth.authStatus);
+app.post('/api/login', auth.login);
+app.post('/api/logout', auth.logout);
+
+// Everything after this line requires auth (unless AUTH_PASS unset)
+app.use('/api', auth.requireAuth);
 
 // ── NEW: simple synchronous search ──────────────────────────
 // POST /api/search { keywords, location?, remote?, limit? } → { jobs, sources, total, tookMs }
@@ -269,26 +278,61 @@ app.post('/api/profile', (req, res) => {
 });
 
 // ── Settings ─────────────────────────────────────────────────
+// Secret fields are encrypted at rest and NEVER returned to the client.
+// Instead we return a masked preview + a boolean flag.
+const SECRET_FIELDS = ['openaiKey', 'serpapiKey', 'jsearchKey', 'tavilyKey', 'gmailPass'];
+
 app.get('/api/settings', (req, res) => {
+  const s = state.settings || {};
+  const publicFields = { ...s };
+  const masks = {};
+  for (const k of SECRET_FIELDS) {
+    const enc = s[`${k}Enc`];
+    const plain = enc ? auth.secrets.decrypt(enc) : (s[k] || '');
+    delete publicFields[k];              // strip plain (should already be absent going forward)
+    delete publicFields[`${k}Enc`];      // never leak the ciphertext either
+    masks[k] = plain ? auth.secrets.mask(plain) : '';
+    publicFields[`${k}Set`] = !!plain;   // UI checks this to show "configured" pill
+  }
   res.json({
-    ...state.settings,
+    ...publicFields,
+    masks,
     hasResume: !!(state.resumePath && fs.existsSync(state.resumePath)),
     resumeName: state.resumePath ? path.basename(state.resumePath) : null,
-    // Populate defaults from env if not set in state
-    gmailUser: state.settings?.gmailUser || process.env.GMAIL_USER || '',
-    jsearchKey: state.settings?.jsearchKey || process.env.JSEARCH_API_KEY || ''
+    gmailUser: s.gmailUser || process.env.GMAIL_USER || ''
   });
 });
 
 app.post('/api/settings', (req, res) => {
-  state.settings = { ...state.settings, ...req.body };
+  const incoming = { ...(req.body || {}) };
+  // For each secret field: if a non-empty new value comes in, encrypt + replace.
+  // If empty string comes in explicitly, clear the secret. If field missing, keep current.
+  for (const k of SECRET_FIELDS) {
+    if (k in incoming) {
+      const val = String(incoming[k] || '').trim();
+      if (val) {
+        state.settings[`${k}Enc`] = auth.secrets.encrypt(val);
+        delete state.settings[k]; // don't keep plaintext
+      } else {
+        delete state.settings[`${k}Enc`];
+        delete state.settings[k];
+      }
+      delete incoming[k];
+    }
+  }
+  state.settings = { ...state.settings, ...incoming };
   saveRun(state);
-
-  // Restart cron if schedule changed
   scheduleCron();
-
   res.json({ ok: true });
 });
+
+// Decrypt-aware secret reader — used everywhere in server.js that needs a real key
+function readSecret(fieldName) {
+  const s = state.settings || {};
+  if (s[`${fieldName}Enc`]) return auth.secrets.decrypt(s[`${fieldName}Enc`]);
+  return s[fieldName] || '';
+}
+app.locals.getSecret = readSecret;
 
 app.post('/api/settings/test-email', async (req, res) => {
   const cfg = buildEmailCfg();
@@ -416,7 +460,7 @@ app.post('/api/send-email/:jobId', async (req, res) => {
   try {
     const overrides = {
       gmailUser: state.settings?.gmailUser || process.env.GMAIL_USER,
-      gmailPass: state.settings?.gmailPass || process.env.GMAIL_APP_PASSWORD
+      gmailPass: readSecret('gmailPass') || process.env.GMAIL_APP_PASSWORD
     };
     const attachments = buildAttachments();
     await sendEmail({ to: job.email, subject: job.emailSubject, body: job.emailBody, attachments, overrides: buildEmailCfg() });
@@ -771,7 +815,7 @@ async function runPilot(config) {
     // Job-search API key: SerpAPI is the active provider in jobSearch.js
     // Primary sources are free public APIs (Remotive, RemoteOK, Arbeitnow) — no key needed.
     // SerpAPI is optional bonus for LinkedIn/Indeed coverage if a valid key is set.
-    const serpapiKey = state.settings?.serpapiKey || process.env.SERPAPI_KEY || '';
+    const serpapiKey = readSecret('serpapiKey') || process.env.SERPAPI_KEY || '';
     const jsearchKey = serpapiKey;
     state.lastError = null;
 
@@ -998,7 +1042,7 @@ function buildEmailCfg() {
   return {
     provider: state.settings?.provider || 'gmail',
     gmailUser: state.settings?.gmailUser || process.env.GMAIL_USER,
-    gmailPass: state.settings?.gmailPass || process.env.GMAIL_APP_PASSWORD,
+    gmailPass: readSecret('gmailPass') || process.env.GMAIL_APP_PASSWORD,
     smtpHost: state.settings?.smtpHost || '',
     smtpPort: state.settings?.smtpPort || '587',
     smtpSecure: state.settings?.smtpSecure || false
