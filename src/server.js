@@ -211,10 +211,32 @@ app.get('/api/analytics', (req, res) => {
 });
 
 // ── Profile ─────────────────────────────────────────────────
+app.get('/api/profile', (req, res) => {
+  const hasResume = !!(state.resumePath && fs.existsSync(state.resumePath));
+  let resumeInfo = null;
+  if (hasResume) {
+    try {
+      const st = fs.statSync(state.resumePath);
+      resumeInfo = {
+        name: path.basename(state.resumePath),
+        sizeKB: Math.round(st.size / 1024),
+        uploadedAt: st.mtime.toISOString()
+      };
+    } catch {}
+  }
+  res.json({
+    ...(state.profile || {}),
+    hasResume,
+    resume: resumeInfo,
+    // Readiness score — every field the auto-apply engine needs
+    ready: !!(state.profile?.name && state.profile?.email && hasResume)
+  });
+});
+
 app.post('/api/profile', (req, res) => {
-  state.profile = req.body;
+  state.profile = { ...state.profile, ...(req.body || {}) };
   saveRun(state);
-  res.json({ ok: true });
+  res.json({ ok: true, profile: state.profile });
 });
 
 // ── Settings ─────────────────────────────────────────────────
