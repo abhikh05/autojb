@@ -1,0 +1,17 @@
+node_modules
+web/node_modules
+.git
+.env
+.env.local
+web/.env.local
+*.log
+public
+portfolio
+site
+restrobot-site
+nevermissed-site
+trainiq
+flightiq
+work
+backups
+test

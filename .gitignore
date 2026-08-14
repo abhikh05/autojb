@@ -1,0 +1,57 @@
+# ── Secrets ──────────────────────────────────────
+.env
+.env.local
+.env.*.local
+web/.env.local
+web/.env.*.local
+
+# ── Personal / runtime state ─────────────────────
+state.json
+uploads/
+!uploads/.gitkeep
+.indeed-cookies.json
+
+# ── Dependencies ─────────────────────────────────
+node_modules
+web/node_modules
+
+# ── Build output ─────────────────────────────────
+web/.next
+web/out
+web/build
+dist
+
+# ── Logs ─────────────────────────────────────────
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+web/.next/trace
+
+# ── OS / editor ──────────────────────────────────
+.DS_Store
+Thumbs.db
+.vscode
+.idea
+*.swp
+
+# ── Local dev ───────────────────────────────────
+.claude
+backups
+{public,src}
+
+# ── Unrelated sibling projects in this workspace ─
+portfolio/
+site/
+flightiq/
+trainiq/
+restrobot-site/
+nevermissed-site/
+work/
+
+# ── Old static page (replaced by web/) ──────────
+public/
+styles.css
+
+# ── Cloudflare tunnel ────────────────────────────
+/tmp/cloudflared.log

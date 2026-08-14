@@ -1,0 +1,23 @@
+{
+  "name": "influencer-job-autopilot",
+  "version": "1.0.0",
+  "description": "Auto-find and apply to influencer marketing jobs",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js"
+  },
+  "dependencies": {
+    "axios": "^1.7.2",
+    "cheerio": "^1.0.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "google-search-results-nodejs": "^2.1.0",
+    "multer": "^2.1.1",
+    "node-cron": "^3.0.3",
+    "nodemailer": "^6.9.14",
+    "openai": "^6.37.0",
+    "puppeteer-core": "^25.0.2"
+  }
+}

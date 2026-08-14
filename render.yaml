@@ -1,0 +1,26 @@
+services:
+  - type: web
+    name: autojb-backend
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PUPPETEER_EXECUTABLE_PATH
+        value: /usr/bin/chromium
+      # Fill these in the Render dashboard, don't commit secrets.
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: SERPAPI_KEY
+        sync: false
+      - key: GMAIL_USER
+        sync: false
+      - key: GMAIL_APP_PASSWORD
+        sync: false
+      # Locked down to your Vercel URL — set after Vercel gives you the domain.
+      # Example: https://autojb.vercel.app,https://autojb-<team>.vercel.app
+      - key: CORS_ORIGIN
+        sync: false

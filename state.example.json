@@ -1,0 +1,20 @@
+{
+  "running": false,
+  "profile": { "name": "", "email": "", "phone": "", "title": "", "keywords": "", "location": "", "bio": "" },
+  "jobs": [],
+  "logs": [],
+  "stats": { "found": 0, "relevant": 0, "emailed": 0, "applied": 0, "skipped": 0 },
+  "runHistory": [],
+  "resumePath": null,
+  "library": { "starred": {}, "applied": {}, "dismissed": {} },
+  "settings": {
+    "provider": "gmail",
+    "gmailUser": "",
+    "gmailPass": "",
+    "serpapiKey": "",
+    "blacklist": [],
+    "minSalary": 0,
+    "skipAppliedCompanies": true
+  },
+  "appliedCompanies": []
+}
