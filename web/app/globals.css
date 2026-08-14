@@ -104,15 +104,25 @@ body {
 .btn-ghost { background: transparent; }
 .btn-sm { padding: 6px 10px; font-size: 12px; border-radius: 8px; }
 
-/* Input */
-.input {
-  width: 100%; padding: 10px 14px; border-radius: 10px;
-  background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1);
-  color: #e8e8f5; font-size: 13px; font-family: var(--font-sans);
-  transition: border-color .15s, background .15s;
+/* Input — inside @layer components so Tailwind utilities like pl-10 override us */
+@layer components {
+  .input {
+    width: 100%;
+    padding-top: 10px;
+    padding-right: 14px;
+    padding-bottom: 10px;
+    padding-left: 14px;
+    border-radius: 10px;
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.1);
+    color: #e8e8f5;
+    font-size: 13px;
+    font-family: var(--font-sans);
+    transition: border-color .15s, background .15s;
+  }
+  .input:focus { outline: none; border-color: rgba(139,92,246,0.6); background: rgba(255,255,255,0.05); box-shadow: 0 0 0 3px rgba(139,92,246,0.15); }
+  .input::placeholder { color: #6a6a85; }
 }
-.input:focus { outline: none; border-color: rgba(139,92,246,0.6); background: rgba(255,255,255,0.05); box-shadow: 0 0 0 3px rgba(139,92,246,0.15); }
-.input::placeholder { color: #6a6a85; }
 
 /* Pill */
 .pill {
