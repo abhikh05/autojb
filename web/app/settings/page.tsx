@@ -77,7 +77,9 @@ export default function SettingsPage() {
   );
 }
 
-function Section({ icon: Icon, title, subtitle, children }: any) {
+function Section({ icon: Icon, title, subtitle, children }: {
+  icon: any; title: string; subtitle: string; children: React.ReactNode;
+}) {
   return (
     <div className="glass p-6 space-y-3">
       <div className="flex items-start gap-3">
@@ -94,7 +96,9 @@ function Section({ icon: Icon, title, subtitle, children }: any) {
   );
 }
 
-function Field({ label, value, onChange, placeholder, type = 'text' }: any) {
+function Field({ label, value, onChange, placeholder, type = 'text' }: {
+  label: string; value: string | undefined; onChange: (v: string) => void; placeholder?: string; type?: string;
+}) {
   return (
     <div>
       <label className="text-[11px] font-mono uppercase tracking-widest text-muted">{label}</label>
