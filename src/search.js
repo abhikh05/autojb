@@ -192,10 +192,26 @@ async function fromArbeitnow(kw) {
 // with LinkedIn URLs. Many LinkedIn jobs are "off-platform apply" → follow the
 // redirect to expose the underlying Greenhouse/Lever/Ashby URL for auto-apply.
 async function fromLinkedIn(kw, location = '', remoteOnly = false) {
+  // LinkedIn's guest endpoint returns ~25 per page. Fetch 3 pages in parallel.
+  const pages = [0, 25, 50];
+  const results = await Promise.all(pages.map(start => fetchLinkedInPage(kw, location, remoteOnly, start).catch(() => [])));
+  const all = results.flat();
+
+  // Dedupe within LinkedIn itself (same job can appear across pages during pagination shifts)
+  const seen = new Set();
+  return all.filter(j => {
+    const k = j.linkedinJobId || `${j.company}|${j.title}`;
+    if (seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  });
+}
+
+async function fetchLinkedInPage(kw, location, remoteOnly, start) {
   const params = new URLSearchParams({
     keywords: kw,
     f_TPR: 'r604800', // last 7 days
-    start: '0'
+    start: String(start)
   });
   if (location) params.set('location', location);
   else if (remoteOnly) params.set('f_WT', '2'); // remote filter code
@@ -237,7 +253,7 @@ async function fromLinkedIn(kw, location = '', remoteOnly = false) {
     });
   });
 
-  return jobs.slice(0, 25);
+  return jobs;
 }
 
 async function fromJobicy(kw) {
@@ -432,13 +448,15 @@ function scoreRelevance(job, query) {
   if (phraseInTitle) score += 4;
   else if (phraseInDesc) score += 1;
 
-  // Require SOME real signal. Reject if no strong+weak matches at all.
-  if (strongMatches === 0 && weakMatches < Math.ceil(qTokens.length / 2)) return 0;
-
-  // Reject if we deducted more than we added (query barely relates)
-  if (score <= 0) return 0;
-
-  return score;
+  // Softer floor: keep the job if either
+  //  (a) at least one strong match (title/tags), OR
+  //  (b) ALL query tokens appear at least in the description
+  // This keeps genuine matches like "Backend Engineer (Python & Django)" for "python developer"
+  // even when the description is the only place all tokens co-occur.
+  const allInDesc = qTokens.every(t => desc.includes(t));
+  if (strongMatches === 0 && !allInDesc && weakMatches < Math.ceil(qTokens.length / 2)) return 0;
+  if (score <= -2) return 0;
+  return Math.max(0.5, score);
 }
 
 // ── URL resolver: follow aggregator redirects to expose real ATS URLs ──

@@ -37,7 +37,7 @@ export default function SearchPage() {
   const [location, setLocation] = useState('');
   const [remoteOnly, setRemoteOnly] = useState(false);
   const [autoOnly, setAutoOnly] = useState(false);
-  const [sortBy, setSortBy] = useState<SortKey>('auto-first');
+  const [sortBy, setSortBy] = useState<SortKey>('newest');
   const [loading, setLoading] = useState(false);
   const [jobs, setJobs] = useState<Job[]>([]);
   const [sources, setSources] = useState<Sources>({});
@@ -83,7 +83,7 @@ export default function SearchPage() {
       const res = await fetch(new URL('/api/search', window.location.origin).toString(), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ keywords: kw, location, remote: remoteOnly, limit: 80 })
+        body: JSON.stringify({ keywords: kw, location, remote: remoteOnly, limit: 100 })
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error || 'Search failed');
@@ -264,8 +264,8 @@ export default function SearchPage() {
           <div className="flex items-center gap-2">
             <ArrowUpDown className="w-3.5 h-3.5 text-muted" />
             <select className="input w-auto py-2" value={sortBy} onChange={e => setSortBy(e.target.value as SortKey)}>
-              <option value="auto-first">Auto-apply first</option>
               <option value="newest">Newest first</option>
+              <option value="auto-first">Auto-apply first</option>
               <option value="company">Company A→Z</option>
             </select>
           </div>
