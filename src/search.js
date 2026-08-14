@@ -3,6 +3,7 @@
  * Called by POST /api/search. Returns jobs directly. That's it.
  */
 const axios = require('axios');
+const cheerio = require('cheerio');
 
 const APPLY_PLATFORMS = {
   greenhouse:      { name: 'Greenhouse',      autoApply: true,  hosts: ['greenhouse.io', 'boards.greenhouse.io'] },
@@ -36,20 +37,21 @@ async function search({ keywords = '', location = '', remote = false, limit = 30
   if (!kw) return { jobs: [], sources: {}, error: 'Enter a keyword to search' };
 
   const started = Date.now();
-  const [remotive, remoteok, arbeitnow, jobicy, himalayas, wwr] = await Promise.all([
+  const [remotive, remoteok, arbeitnow, jobicy, himalayas, wwr, linkedin] = await Promise.all([
     fromRemotive(kw).catch(e => { console.warn('[Remotive]', e.message); return []; }),
     fromRemoteOK(kw).catch(e => { console.warn('[RemoteOK]', e.message); return []; }),
     fromArbeitnow(kw).catch(e => { console.warn('[Arbeitnow]', e.message); return []; }),
     fromJobicy(kw).catch(e => { console.warn('[Jobicy]', e.message); return []; }),
     fromHimalayas(kw).catch(e => { console.warn('[Himalayas]', e.message); return []; }),
-    fromWWR(kw).catch(e => { console.warn('[WWR]', e.message); return []; })
+    fromWWR(kw).catch(e => { console.warn('[WWR]', e.message); return []; }),
+    fromLinkedIn(kw, location, remote).catch(e => { console.warn('[LinkedIn]', e.message); return []; })
   ]);
 
   const sources = {
     remotive: remotive.length, remoteok: remoteok.length, arbeitnow: arbeitnow.length,
-    jobicy: jobicy.length, himalayas: himalayas.length, wwr: wwr.length
+    jobicy: jobicy.length, himalayas: himalayas.length, wwr: wwr.length, linkedin: linkedin.length
   };
-  const all = [...remotive, ...remoteok, ...arbeitnow, ...jobicy, ...himalayas, ...wwr];
+  const all = [...remotive, ...remoteok, ...arbeitnow, ...jobicy, ...himalayas, ...wwr, ...linkedin];
 
   // Dedupe by (company + title)
   const seen = new Set();
@@ -77,8 +79,13 @@ async function search({ keywords = '', location = '', remote = false, limit = 30
   // Newest first
   unique.sort((a, b) => (b.postedAt || 0) - (a.postedAt || 0));
 
-  // Attach platform classification + id
-  const jobs = unique.slice(0, limit).map((j, i) => {
+  // Cap early, then resolve aggregator URLs → real ATS URLs (in parallel, bounded).
+  // Turns e.g. "https://remotive.com/remote-jobs/X" into the underlying Greenhouse/Lever URL,
+  // which lets our ATS auto-apply engine kick in for many more jobs.
+  const capped = unique.slice(0, limit);
+  await resolveApplyUrls(capped);
+
+  const jobs = capped.map((j, i) => {
     const platform = classify(j.applyUrl);
     return { id: `j${i + 1}`, ...j, platform };
   });
@@ -160,6 +167,59 @@ async function fromArbeitnow(kw) {
       tags: (j.tags || []).slice(0, 6),
       source: 'arbeitnow'
     }));
+}
+
+// ── LinkedIn (public guest search, no auth) ─────────────────
+// Parses LinkedIn's public jobs-guest search endpoint. Returns real listings
+// with LinkedIn URLs. Many LinkedIn jobs are "off-platform apply" → follow the
+// redirect to expose the underlying Greenhouse/Lever/Ashby URL for auto-apply.
+async function fromLinkedIn(kw, location = '', remoteOnly = false) {
+  const params = new URLSearchParams({
+    keywords: kw,
+    f_TPR: 'r604800', // last 7 days
+    start: '0'
+  });
+  if (location) params.set('location', location);
+  else if (remoteOnly) params.set('f_WT', '2'); // remote filter code
+
+  const url = `https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search?${params.toString()}`;
+  const r = await axios.get(url, {
+    timeout: 15000,
+    headers: {
+      'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+      'Accept-Language': 'en-US,en;q=0.9'
+    }
+  });
+
+  const $ = cheerio.load(r.data);
+  const jobs = [];
+  $('.base-card, .job-search-card').each((_, el) => {
+    const $el = $(el);
+    const title = $el.find('.base-search-card__title').text().trim();
+    const company = $el.find('.base-search-card__subtitle a, .base-search-card__subtitle').first().text().trim();
+    const loc = $el.find('.job-search-card__location').text().trim();
+    const link = $el.find('a.base-card__full-link').attr('href') || '';
+    const posted = $el.find('time').attr('datetime') || '';
+    const jobId = ($el.attr('data-entity-urn') || '').replace('urn:li:jobPosting:', '');
+    if (!title || !link) return;
+
+    jobs.push({
+      title,
+      company: company || 'Unknown',
+      location: loc || (remoteOnly ? 'Remote' : ''),
+      remote: /remote|anywhere/i.test(loc + ' ' + title),
+      salary: null,
+      posted: posted ? relTime(posted) : 'Recently',
+      postedAt: posted ? Date.parse(posted) || Date.now() : Date.now(),
+      description: '',
+      applyUrl: link.split('?')[0], // strip tracking params
+      linkedinJobId: jobId,
+      tags: [],
+      source: 'linkedin'
+    });
+  });
+
+  return jobs.slice(0, 25);
 }
 
 async function fromJobicy(kw) {
@@ -305,6 +365,69 @@ function relTime(iso) {
   if (s < 3600) return `${Math.max(1, Math.floor(s / 60))}m ago`;
   if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
   return `${Math.floor(s / 86400)}d ago`;
+}
+
+// ── URL resolver: follow aggregator redirects to expose real ATS URLs ──
+// Runs on the capped result set to keep cost low. Fires in parallel with a
+// concurrency limit so we don't hammer sources.
+const AGGREGATOR_HOSTS = ['remotive.com', 'arbeitnow.com', 'himalayas.app', 'jobicy.com', 'weworkremotely.com'];
+const ATS_HOSTS_FOR_PROMOTION = ['greenhouse.io', 'lever.co', 'ashbyhq.com', 'workable.com', 'myworkdayjobs.com', 'smartrecruiters.com'];
+
+async function resolveApplyUrls(jobs) {
+  const CONCURRENCY = 6;
+  const targets = jobs.filter(j => j.applyUrl && AGGREGATOR_HOSTS.some(h => j.applyUrl.includes(h)));
+  let i = 0;
+  const workers = Array.from({ length: Math.min(CONCURRENCY, targets.length) }, () =>
+    (async () => {
+      while (i < targets.length) {
+        const idx = i++;
+        const job = targets[idx];
+        try {
+          const finalUrl = await followRedirects(job.applyUrl);
+          if (finalUrl && ATS_HOSTS_FOR_PROMOTION.some(h => finalUrl.includes(h))) {
+            job.originalUrl = job.applyUrl;
+            job.applyUrl = finalUrl;
+            job.source = job.source + '→' + finalUrl.match(/\/\/([^/]+)/)?.[1]?.split('.')?.slice(-2, -1)?.[0];
+          }
+        } catch {} // silent — worst case we keep the aggregator URL
+      }
+    })()
+  );
+  await Promise.all(workers);
+}
+
+async function followRedirects(url, maxHops = 5) {
+  let current = url;
+  for (let hop = 0; hop < maxHops; hop++) {
+    try {
+      const r = await axios.head(current, {
+        timeout: 6000,
+        maxRedirects: 0,
+        validateStatus: s => s < 500,
+        headers: { 'User-Agent': 'Mozilla/5.0 (compatible; JobAutopilot/2.0)' }
+      });
+      const loc = r.headers?.location;
+      if (r.status >= 300 && r.status < 400 && loc) {
+        current = new URL(loc, current).href;
+      } else {
+        return current;
+      }
+    } catch (e) {
+      // Some aggregators redirect on GET only, or 405 on HEAD — try GET once
+      if (hop === 0) {
+        try {
+          const r = await axios.get(current, {
+            timeout: 8000,
+            maxRedirects: 3,
+            headers: { 'User-Agent': 'Mozilla/5.0 (compatible; JobAutopilot/2.0)' }
+          });
+          return r.request?.res?.responseUrl || r.config.url || current;
+        } catch { return current; }
+      }
+      return current;
+    }
+  }
+  return current;
 }
 
 module.exports = { search, classify, APPLY_PLATFORMS };

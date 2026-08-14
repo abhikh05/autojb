@@ -82,7 +82,7 @@ export default function SearchPage() {
       const res = await fetch(new URL('/api/search', window.location.origin).toString(), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ keywords: kw, location, remote: remoteOnly, limit: 40 })
+        body: JSON.stringify({ keywords: kw, location, remote: remoteOnly, limit: 80 })
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error || 'Search failed');
@@ -178,7 +178,7 @@ export default function SearchPage() {
       <PageHeader
         eyebrow="DISCOVERY"
         title="Job Search"
-        subtitle="Real jobs from Remotive, RemoteOK and Arbeitnow. Posted this week. No API keys required."
+        subtitle="Real jobs from LinkedIn, Remotive, RemoteOK, Arbeitnow, Jobicy, Himalayas and WeWorkRemotely. Posted this week."
         actions={
           <button className="btn btn-neon" onClick={autoApplyAll} disabled={loading || autoCount === 0}>
             <Zap className="w-3.5 h-3.5" /> Auto-apply all ({autoCount})
