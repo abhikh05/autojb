@@ -5,31 +5,34 @@
 const axios = require('axios');
 const cheerio = require('cheerio');
 
+// applyMode: 'auto'     = server fills the ATS form (real one-click)
+//            'assisted' = we open URL, user completes on the platform (their auth)
+//            'manual'   = plain external link, no server involvement
 const APPLY_PLATFORMS = {
-  greenhouse:      { name: 'Greenhouse',      autoApply: true,  hosts: ['greenhouse.io', 'boards.greenhouse.io'] },
-  lever:           { name: 'Lever',           autoApply: true,  hosts: ['lever.co', 'jobs.lever.co'] },
-  ashby:           { name: 'Ashby',           autoApply: true,  hosts: ['ashbyhq.com'] },
-  workable:        { name: 'Workable',        autoApply: true,  hosts: ['workable.com'] },
-  workday:         { name: 'Workday',         autoApply: true,  hosts: ['myworkdayjobs.com', 'workday.com'] },
-  smartrecruiters: { name: 'SmartRecruiters', autoApply: true,  hosts: ['smartrecruiters.com'] },
-  indeed:          { name: 'Indeed',          autoApply: true,  hosts: ['indeed.com'] },
-  linkedin:        { name: 'LinkedIn',        autoApply: true,  hosts: ['linkedin.com'] },
-  remotive:        { name: 'Remotive',        autoApply: false, hosts: ['remotive.com'] },
-  remoteok:        { name: 'RemoteOK',        autoApply: false, hosts: ['remoteok.com'] },
-  arbeitnow:       { name: 'Arbeitnow',       autoApply: false, hosts: ['arbeitnow.com'] },
-  jobicy:          { name: 'Jobicy',          autoApply: false, hosts: ['jobicy.com'] },
-  himalayas:       { name: 'Himalayas',       autoApply: false, hosts: ['himalayas.app'] },
-  wwr:             { name: 'WeWorkRemotely',  autoApply: false, hosts: ['weworkremotely.com'] }
+  greenhouse:      { name: 'Greenhouse',      applyMode: 'auto',     hosts: ['greenhouse.io', 'boards.greenhouse.io'] },
+  lever:           { name: 'Lever',           applyMode: 'auto',     hosts: ['lever.co', 'jobs.lever.co'] },
+  ashby:           { name: 'Ashby',           applyMode: 'auto',     hosts: ['ashbyhq.com'] },
+  workable:        { name: 'Workable',        applyMode: 'auto',     hosts: ['workable.com'] },
+  workday:         { name: 'Workday',         applyMode: 'assisted', hosts: ['myworkdayjobs.com', 'workday.com'] },
+  smartrecruiters: { name: 'SmartRecruiters', applyMode: 'assisted', hosts: ['smartrecruiters.com'] },
+  indeed:          { name: 'Indeed',          applyMode: 'assisted', hosts: ['indeed.com'] },
+  linkedin:        { name: 'LinkedIn',        applyMode: 'assisted', hosts: ['linkedin.com'] },
+  remotive:        { name: 'Remotive',        applyMode: 'manual',   hosts: ['remotive.com'] },
+  remoteok:        { name: 'RemoteOK',        applyMode: 'manual',   hosts: ['remoteok.com'] },
+  arbeitnow:       { name: 'Arbeitnow',       applyMode: 'manual',   hosts: ['arbeitnow.com'] },
+  jobicy:          { name: 'Jobicy',          applyMode: 'manual',   hosts: ['jobicy.com'] },
+  himalayas:       { name: 'Himalayas',       applyMode: 'manual',   hosts: ['himalayas.app'] },
+  wwr:             { name: 'WeWorkRemotely',  applyMode: 'manual',   hosts: ['weworkremotely.com'] }
 };
 
 function classify(url) {
   const u = (url || '').toLowerCase();
   for (const [kind, p] of Object.entries(APPLY_PLATFORMS)) {
     if (p.hosts.some(h => u.includes(h))) {
-      return { kind, name: p.name, autoApply: p.autoApply };
+      return { kind, name: p.name, applyMode: p.applyMode, autoApply: p.applyMode === 'auto' };
     }
   }
-  return { kind: 'company', name: 'Company site', autoApply: false };
+  return { kind: 'company', name: 'Company site', applyMode: 'manual', autoApply: false };
 }
 
 async function search({ keywords = '', location = '', remote = false, limit = 30 } = {}) {

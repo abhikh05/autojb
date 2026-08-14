@@ -83,23 +83,27 @@ app.post('/api/search/apply', async (req, res) => {
   const fp = fingerprint(job);
   const useProfile = profile || state.profile || {};
 
-  let result = { ok: true, reason: 'Marked applied', method: method || 'manual' };
-  if (method !== 'manual') {
-    const url = job.applyUrl || '';
-    const isIndeed = url.includes('indeed.com');
-    const isLinkedIn = url.includes('linkedin.com');
-    if (pickATSAdapter(url)) {
-      result = await applyATS(job, useProfile, state.resumePath);
-    } else if (isIndeed && state.resumePath) {
-      result = await applyIndeedJob(job, useProfile, state.resumePath, broadcast);
-    } else if (isLinkedIn) {
-      // LinkedIn Easy Apply needs an authenticated session we don't have server-side.
-      // Return openInBrowser so the frontend opens the URL and marks it applied.
-      result = { ok: true, reason: 'LinkedIn Easy Apply — opened in new tab', method: 'open', openInBrowser: true };
-    } else {
-      // Unknown platform → tell the UI to open the URL manually
-      result = { ok: true, reason: 'No auto-apply adapter — opened in new tab', method: 'open', openInBrowser: true };
-    }
+  // The applyMode passed from client. Honest contract:
+  //  'auto'     → server fills form via Puppeteer, returns real ok/fail + reason
+  //  'assisted' → server does NOT auto-apply, just returns "open the URL yourself"
+  //  'manual'   → same as assisted; caller records after they've actually applied
+  const requestedMode = job.platform?.applyMode || (method === 'manual' ? 'manual' : 'auto');
+  let result = { ok: true, reason: 'Marked applied', applyMode: requestedMode };
+
+  if (requestedMode === 'auto' && pickATSAdapter(job.applyUrl || '')) {
+    result = await applyATS(job, useProfile, state.resumePath);
+    result.applyMode = 'auto';
+  } else if (requestedMode === 'assisted') {
+    // Do NOT mark applied server-side. Frontend will open URL + prompt user.
+    result = {
+      ok: true,
+      applyMode: 'assisted',
+      openUrl: job.applyUrl,
+      reason: `Open ${job.platform?.name || 'the site'} in a new tab and finish the application there`,
+      shouldMarkApplied: false
+    };
+  } else if (requestedMode === 'manual') {
+    result = { ok: true, applyMode: 'manual', openUrl: job.applyUrl, shouldMarkApplied: !!req.body?.confirmed };
   }
 
   if (result?.ok) {

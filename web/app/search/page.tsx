@@ -12,7 +12,8 @@ import {
 } from 'lucide-react';
 
 // ── Types ────────────────────────────────────────────────────
-type Platform = { kind: string; name: string; autoApply: boolean };
+type ApplyMode = 'auto' | 'assisted' | 'manual';
+type Platform = { kind: string; name: string; autoApply: boolean; applyMode: ApplyMode };
 type Job = {
   id: string; title: string; company: string; location?: string;
   remote?: boolean; salary?: string | null; posted?: string; postedAt?: number;
@@ -113,26 +114,51 @@ export default function SearchPage() {
     });
   }, [jobs, autoOnly, sortBy]);
 
-  const autoCount = jobs.filter(j => j.platform.autoApply).length;
-  const manualCount = jobs.length - autoCount;
+  const autoCount = jobs.filter(j => j.platform.applyMode === 'auto').length;
+  const assistedCount = jobs.filter(j => j.platform.applyMode === 'assisted').length;
+  const manualCount = jobs.filter(j => j.platform.applyMode === 'manual').length;
 
   const markLocalApplied = (job: Job) => {
     const fp = fingerprint(job);
     setApplied(a => ({ ...a, [job.id]: true, [fp]: true }));
   };
 
+  const persistApplied = async (job: Job, method: 'auto' | 'manual') => {
+    // Backend records this in state.library.applied (fingerprint keyed)
+    await fetch(new URL('/api/search/apply', window.location.origin).toString(), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ job, method, confirmed: true })
+    }).catch(() => {});
+  };
+
   const applyOne = async (job: Job) => {
-    if (!job.platform.autoApply) {
-      // Manual — open URL, record as applied on backend.
+    const mode = job.platform.applyMode;
+
+    // ── MANUAL ── just open, no marking
+    if (mode === 'manual') {
       if (job.applyUrl) window.open(job.applyUrl, '_blank', 'noopener');
-      markLocalApplied(job);
-      await fetch(new URL('/api/search/apply', window.location.origin).toString(), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ job, method: 'manual' })
-      }).catch(() => {});
       return;
     }
+
+    // ── ASSISTED ── open on platform, then ask user to confirm they applied
+    if (mode === 'assisted') {
+      if (job.applyUrl) window.open(job.applyUrl, '_blank', 'noopener');
+      // Small delay so the new tab has time to focus before the confirm dialog
+      setTimeout(() => {
+        const ok = window.confirm(
+          `Opened on ${job.platform.name}.\n\n` +
+          `Did you complete the application? Click OK to mark it as applied, or Cancel to leave it open.`
+        );
+        if (ok) {
+          markLocalApplied(job);
+          persistApplied(job, 'manual');
+        }
+      }, 800);
+      return;
+    }
+
+    // ── AUTO ── real server-side form-fill
     setApplyingId(job.id);
     try {
       const r = await fetch(new URL('/api/search/apply', window.location.origin).toString(), {
@@ -143,15 +169,15 @@ export default function SearchPage() {
       const data = await r.json();
       if (data?.ok) {
         markLocalApplied(job);
-        // Backend may signal that we should open the URL for the user (LinkedIn Easy Apply, unknown platforms)
-        if (data.openInBrowser && job.applyUrl) window.open(job.applyUrl, '_blank', 'noopener');
       } else {
-        alert(`Couldn't auto-apply: ${data?.reason || data?.error || 'unknown error'}. Opening the listing so you can apply manually.`);
-        if (job.applyUrl) window.open(job.applyUrl, '_blank', 'noopener');
+        const openIt = window.confirm(
+          `Auto-apply couldn't complete: ${data?.reason || 'unknown error'}\n\n` +
+          `Want to open the listing to apply manually?`
+        );
+        if (openIt && job.applyUrl) window.open(job.applyUrl, '_blank', 'noopener');
       }
-    } catch {
-      alert('Auto-apply failed. Opening listing.');
-      if (job.applyUrl) window.open(job.applyUrl, '_blank', 'noopener');
+    } catch (e: any) {
+      alert('Auto-apply request failed: ' + (e?.message || e));
     } finally {
       setApplyingId(null);
     }
@@ -169,9 +195,10 @@ export default function SearchPage() {
   };
 
   const autoApplyAll = async () => {
-    const targets = shown.filter(j => j.platform.autoApply && !applied[j.id]);
-    if (!targets.length) return alert('Nothing to auto-apply to.');
-    if (!confirm(`Auto-apply to ${targets.length} jobs? A browser window may open for some platforms.`)) return;
+    // Only true auto-apply — never mass-open LinkedIn/Indeed tabs
+    const targets = shown.filter(j => j.platform.applyMode === 'auto' && !applied[j.id]);
+    if (!targets.length) return alert('No true auto-apply jobs in this view (Greenhouse, Lever, Ashby, Workable). Assisted jobs like LinkedIn need one click each.');
+    if (!confirm(`Auto-apply to ${targets.length} jobs? The server will fill each ATS form and submit. Takes ~30s per job.`)) return;
     for (const j of targets) await applyOne(j);
   };
 
@@ -229,10 +256,10 @@ export default function SearchPage() {
             <input type="checkbox" checked={remoteOnly} onChange={e => setRemoteOnly(e.target.checked)} className="accent-violet-500" />
             <span className="text-ink">Remote only</span>
           </label>
-          <label className="flex items-center gap-2 cursor-pointer select-none px-3 py-2 rounded-lg border border-white/10 hover:bg-white/[0.03]">
+          <label className="flex items-center gap-2 cursor-pointer select-none px-3 py-2 rounded-lg border border-white/10 hover:bg-white/[0.03]" title="Only show jobs where the server can fully fill and submit the form">
             <input type="checkbox" checked={autoOnly} onChange={e => setAutoOnly(e.target.checked)} className="accent-neon" />
             <Bot className="w-3.5 h-3.5 text-neon" />
-            <span className="text-ink">Auto-apply only</span>
+            <span className="text-ink">True auto-apply only</span>
           </label>
           <div className="flex items-center gap-2">
             <ArrowUpDown className="w-3.5 h-3.5 text-muted" />
@@ -295,13 +322,12 @@ export default function SearchPage() {
         <div className="flex items-center gap-3 mb-3 text-[12px] text-muted2 flex-wrap">
           <span className="text-ink font-medium">{shown.length} results</span>
           <span>·</span>
-          <span>Auto <b className="text-neon">{autoCount}</b></span>
+          <span title="Server fills the form for you (Greenhouse, Lever, Ashby, Workable)">Auto <b className="text-neon">{autoCount}</b></span>
           <span>·</span>
-          <span>Manual <b className="text-ink/80">{manualCount}</b></span>
+          <span title="You sign in on the platform once, then applying is one click (LinkedIn, Indeed)">1-click <b className="text-cyan-400">{assistedCount}</b></span>
+          <span>·</span>
+          <span title="External link to the company site — you fill the form yourself">Manual <b className="text-amber">{manualCount}</b></span>
           {tookMs != null && <><span>·</span><span className="font-mono">{tookMs}ms</span></>}
-          <span className="ml-auto">
-            {sources.remotive || 0} remotive · {sources.remoteok || 0} remoteok · {sources.arbeitnow || 0} arbeitnow
-          </span>
         </div>
       )}
 
@@ -336,17 +362,21 @@ function JobRow({ job, applying, applied, starred, onApply, onStar, onTailor }: 
   job: Job; applying: boolean; applied: boolean; starred: boolean;
   onApply: () => void; onStar: () => void; onTailor: () => void;
 }) {
-  const auto = job.platform.autoApply;
+  const mode = job.platform.applyMode;
+  const modePill =
+    mode === 'auto'     ? { cls: 'pill-neon',   Icon: Bot,          label: 'AUTO-APPLY' } :
+    mode === 'assisted' ? { cls: 'pill-cyan',   Icon: ExternalLink, label: `1-CLICK · ${job.platform.name.toUpperCase()}` } :
+                          { cls: 'pill-amber',  Icon: ExternalLink, label: 'MANUAL' };
   return (
     <div className="glass p-4 sm:p-5 hover:border-white/[0.14] transition-all">
       <div className="flex items-start justify-between gap-4 flex-col sm:flex-row">
         <div className="min-w-0 flex-1 w-full">
           <div className="flex items-center gap-2 mb-1.5 flex-wrap">
-            <span className={`pill ${auto ? 'pill-neon' : 'pill-amber'}`}>
-              {auto ? <Bot className="w-3 h-3" /> : <ExternalLink className="w-3 h-3" />}
+            <span className={`pill ${modePill.cls}`}>
+              <modePill.Icon className="w-3 h-3" />
               {job.platform.name}
             </span>
-            {auto && <span className="pill pill-neon">AUTO-APPLY READY</span>}
+            <span className={`pill ${modePill.cls}`}>{modePill.label}</span>
             {job.remote && <span className="pill pill-cyan">remote</span>}
             {job.posted && <span className="text-[11px] text-muted font-mono">{job.posted}</span>}
           </div>
@@ -375,14 +405,18 @@ function JobRow({ job, applying, applied, starred, onApply, onStar, onTailor }: 
             <span className="btn text-neon border-neon/40 bg-neon/10 pointer-events-none">
               <Check className="w-3.5 h-3.5" /> Applied
             </span>
-          ) : auto ? (
+          ) : mode === 'auto' ? (
             <button className="btn btn-primary" onClick={onApply} disabled={applying}>
               {applying ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Bot className="w-3.5 h-3.5" />}
               {applying ? 'Applying…' : `Auto-apply · ${job.platform.name}`}
             </button>
+          ) : mode === 'assisted' ? (
+            <button className="btn btn-neon" onClick={onApply} title={`Opens ${job.platform.name} in a new tab — sign in there once and applying is one click`}>
+              <ExternalLink className="w-3.5 h-3.5" /> Open on {job.platform.name}
+            </button>
           ) : (
             <button className="btn" onClick={onApply}>
-              <ExternalLink className="w-3.5 h-3.5" /> Apply manually
+              <ExternalLink className="w-3.5 h-3.5" /> Apply on site
             </button>
           )}
           <div className="flex items-center gap-1">
