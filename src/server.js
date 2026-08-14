@@ -83,15 +83,22 @@ app.post('/api/search/apply', async (req, res) => {
   const fp = fingerprint(job);
   const useProfile = profile || state.profile || {};
 
-  let result = { ok: true, reason: 'Marked applied' };
+  let result = { ok: true, reason: 'Marked applied', method: method || 'manual' };
   if (method !== 'manual') {
-    const isIndeed = job.applyUrl.includes('indeed.com');
-    if (pickATSAdapter(job.applyUrl)) {
+    const url = job.applyUrl || '';
+    const isIndeed = url.includes('indeed.com');
+    const isLinkedIn = url.includes('linkedin.com');
+    if (pickATSAdapter(url)) {
       result = await applyATS(job, useProfile, state.resumePath);
-    } else if (isIndeed) {
+    } else if (isIndeed && state.resumePath) {
       result = await applyIndeedJob(job, useProfile, state.resumePath, broadcast);
+    } else if (isLinkedIn) {
+      // LinkedIn Easy Apply needs an authenticated session we don't have server-side.
+      // Return openInBrowser so the frontend opens the URL and marks it applied.
+      result = { ok: true, reason: 'LinkedIn Easy Apply — opened in new tab', method: 'open', openInBrowser: true };
     } else {
-      result = await autoApplyToJob(job, useProfile, state.resumePath);
+      // Unknown platform → tell the UI to open the URL manually
+      result = { ok: true, reason: 'No auto-apply adapter — opened in new tab', method: 'open', openInBrowser: true };
     }
   }
 

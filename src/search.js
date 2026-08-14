@@ -63,21 +63,36 @@ async function search({ keywords = '', location = '', remote = false, limit = 30
     unique.push(j);
   }
 
+  // Strict relevance filter — drop jobs where the keyword isn't a real match.
+  // This kills "Executive Assistant" showing up for "python developer".
+  unique = unique
+    .map(j => ({ ...j, relevance: scoreRelevance(j, kw) }))
+    .filter(j => j.relevance > 0);
+
   // Last 7 days
   const cutoff = Date.now() - 7 * 86400000;
   unique = unique.filter(j => (j.postedAt || 0) >= cutoff);
 
-  // Location filter
+  // Location filter — only match against the job's location string, not company/title
   if (location.trim()) {
     const loc = location.toLowerCase();
-    unique = unique.filter(j => (j.location || '').toLowerCase().includes(loc) || (j.remote && /remote|anywhere/i.test(loc)));
+    unique = unique.filter(j => {
+      const jobLoc = (j.location || '').toLowerCase();
+      if (jobLoc.includes(loc)) return true;
+      if (j.remote && /remote|anywhere/i.test(loc)) return true;
+      return false;
+    });
   }
 
   // Remote-only filter
   if (remote) unique = unique.filter(j => j.remote);
 
-  // Newest first
-  unique.sort((a, b) => (b.postedAt || 0) - (a.postedAt || 0));
+  // Sort: relevance bucket first, then newest within bucket
+  unique.sort((a, b) => {
+    const dr = Math.round((b.relevance || 0) * 10) - Math.round((a.relevance || 0) * 10);
+    if (dr !== 0) return dr;
+    return (b.postedAt || 0) - (a.postedAt || 0);
+  });
 
   // Cap early, then resolve aggregator URLs → real ATS URLs (in parallel, bounded).
   // Turns e.g. "https://remotive.com/remote-jobs/X" into the underlying Greenhouse/Lever URL,
@@ -365,6 +380,62 @@ function relTime(iso) {
   if (s < 3600) return `${Math.max(1, Math.floor(s / 60))}m ago`;
   if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
   return `${Math.floor(s / 86400)}d ago`;
+}
+
+// ── Relevance scoring ────────────────────────────────────────
+// Simple weighted keyword match. Every non-trivial word in the query must
+// appear somewhere; matches in title/tags weigh more than description.
+// Returns 0 for irrelevant jobs (which get filtered out), higher = better.
+const STOPWORDS = new Set(['the', 'a', 'an', 'and', 'or', 'for', 'in', 'of', 'to', 'with', 'on', 'at', 'jobs', 'job']);
+
+function tokenize(s) {
+  return String(s || '').toLowerCase()
+    .replace(/[^\w\s+#./-]/g, ' ')
+    .split(/\s+/)
+    .filter(w => w && !STOPWORDS.has(w) && w.length > 1);
+}
+
+function scoreRelevance(job, query) {
+  const qTokens = tokenize(query);
+  if (qTokens.length === 0) return 1;
+
+  const title = String(job.title || '').toLowerCase();
+  const tags = (job.tags || []).join(' ').toLowerCase();
+  const desc = String(job.description || '').toLowerCase();
+  const company = String(job.company || '').toLowerCase();
+
+  // Phrase bonus — full query as a substring
+  const fullPhrase = qTokens.join(' ');
+  const phraseInTitle = title.includes(fullPhrase);
+  const phraseInDesc = desc.includes(fullPhrase);
+
+  let score = 0;
+  let strongMatches = 0; // matches in title OR tags
+  let weakMatches = 0;   // matches only in description
+
+  for (const t of qTokens) {
+    const inTitle = title.includes(t);
+    const inTags = tags.includes(t);
+    const inDesc = desc.includes(t);
+    const inCompany = company.includes(t);
+    // Company-name-only matches don't count — they're often coincidental
+    if (inTitle) { score += 3; strongMatches++; }
+    else if (inTags) { score += 2; strongMatches++; }
+    else if (inDesc) { score += 0.5; weakMatches++; }
+    else if (inCompany) { score += 0; } // ignore
+    else { score -= 1; } // token entirely absent — punish
+  }
+
+  if (phraseInTitle) score += 4;
+  else if (phraseInDesc) score += 1;
+
+  // Require SOME real signal. Reject if no strong+weak matches at all.
+  if (strongMatches === 0 && weakMatches < Math.ceil(qTokens.length / 2)) return 0;
+
+  // Reject if we deducted more than we added (query barely relates)
+  if (score <= 0) return 0;
+
+  return score;
 }
 
 // ── URL resolver: follow aggregator redirects to expose real ATS URLs ──

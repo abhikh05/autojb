@@ -143,6 +143,8 @@ export default function SearchPage() {
       const data = await r.json();
       if (data?.ok) {
         markLocalApplied(job);
+        // Backend may signal that we should open the URL for the user (LinkedIn Easy Apply, unknown platforms)
+        if (data.openInBrowser && job.applyUrl) window.open(job.applyUrl, '_blank', 'noopener');
       } else {
         alert(`Couldn't auto-apply: ${data?.reason || data?.error || 'unknown error'}. Opening the listing so you can apply manually.`);
         if (job.applyUrl) window.open(job.applyUrl, '_blank', 'noopener');
