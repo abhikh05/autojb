@@ -6,9 +6,10 @@
 import { useEffect, useMemo, useState } from 'react';
 import { PageHeader } from '@/components/PageHeader';
 import { TailorModal } from '@/components/TailorModal';
+import { AtsScanModal } from '@/components/AtsScanModal';
 import {
   Search as SearchIcon, MapPin, Bot, ExternalLink, Loader2, Sparkles,
-  Zap, ArrowUpDown, Check, X, Star, Play, AlertTriangle, FileText
+  Zap, ArrowUpDown, Check, X, Star, Play, AlertTriangle, FileText, ScanSearch
 } from 'lucide-react';
 
 // ── Types ────────────────────────────────────────────────────
@@ -49,6 +50,7 @@ export default function SearchPage() {
   const [starred, setStarred] = useState<Record<string, boolean>>({});
   const [applied, setApplied] = useState<Record<string, boolean>>({});
   const [tailorJob, setTailorJob] = useState<Job | null>(null);
+  const [atsJob, setAtsJob] = useState<Job | null | 'health'>(null);
 
   // Load persistent library from backend on mount.
   useEffect(() => {
@@ -209,9 +211,14 @@ export default function SearchPage() {
         title="Job Search"
         subtitle="Real jobs from LinkedIn, Remotive, RemoteOK, Arbeitnow, Jobicy, Himalayas and WeWorkRemotely. Posted this week."
         actions={
-          <button className="btn btn-neon" onClick={autoApplyAll} disabled={loading || autoCount === 0}>
-            <Zap className="w-3.5 h-3.5" /> Auto-apply all ({autoCount})
-          </button>
+          <>
+            <button className="btn" onClick={() => setAtsJob('health')} title="Run an ATS health check on your resume">
+              <ScanSearch className="w-3.5 h-3.5" /> ATS scan
+            </button>
+            <button className="btn btn-neon" onClick={autoApplyAll} disabled={loading || autoCount === 0}>
+              <Zap className="w-3.5 h-3.5" /> Auto-apply all ({autoCount})
+            </button>
+          </>
         }
       />
 
@@ -345,6 +352,7 @@ export default function SearchPage() {
               onApply={() => applyOne(job)}
               onStar={() => toggleStar(job)}
               onTailor={() => setTailorJob(job)}
+              onScan={() => setAtsJob(job)}
             />
           );
         })}
@@ -353,14 +361,21 @@ export default function SearchPage() {
       {tailorJob && (
         <TailorModal job={tailorJob} onClose={() => setTailorJob(null)} onApply={() => { applyOne(tailorJob); setTailorJob(null); }} />
       )}
+
+      {atsJob && (
+        <AtsScanModal
+          job={atsJob === 'health' ? null : atsJob}
+          onClose={() => setAtsJob(null)}
+        />
+      )}
     </div>
   );
 }
 
 // ── Job row ──────────────────────────────────────────────────
-function JobRow({ job, applying, applied, starred, onApply, onStar, onTailor }: {
+function JobRow({ job, applying, applied, starred, onApply, onStar, onTailor, onScan }: {
   job: Job; applying: boolean; applied: boolean; starred: boolean;
-  onApply: () => void; onStar: () => void; onTailor: () => void;
+  onApply: () => void; onStar: () => void; onTailor: () => void; onScan: () => void;
 }) {
   const mode = job.platform.applyMode;
   const modePill =
@@ -420,6 +435,9 @@ function JobRow({ job, applying, applied, starred, onApply, onStar, onTailor }: 
             </button>
           )}
           <div className="flex items-center gap-1">
+            <button className="btn btn-sm btn-ghost" onClick={onScan} title="ATS scan — score your resume against this job">
+              <ScanSearch className="w-3.5 h-3.5 text-neon" />
+            </button>
             <button className="btn btn-sm btn-ghost" onClick={onTailor} title="AI tailor for this job">
               <FileText className="w-3.5 h-3.5 text-violet-400" />
             </button>

@@ -18,6 +18,7 @@
     "node-cron": "^3.0.3",
     "nodemailer": "^6.9.14",
     "openai": "^6.37.0",
+    "pdf-parse": "^2.4.5",
     "puppeteer-core": "^25.0.2"
   }
 }

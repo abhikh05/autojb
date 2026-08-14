@@ -13,6 +13,7 @@ const { searchJobs } = require('./jobSearch');
 const { search: newSearch } = require('./search');
 const { applyATS, pickAdapter: pickATSAdapter } = require('./atsApply');
 const { tailor } = require('./tailor');
+const { scan: atsScan } = require('./atsScanner');
 const { scoreJobs } = require('./scorer');
 const { draftEmails } = require('./emailDrafter');
 const { sendEmail, testConnection } = require('./mailer');
@@ -168,6 +169,23 @@ app.delete('/api/library/applied/:fp', (req, res) => {
   delete state.library.applied[req.params.fp];
   saveRun(state);
   res.json({ ok: true });
+});
+
+// ATS scanner — POST { job? } → { kind, match?, health, resumeChars }
+// If job is passed → per-job match analysis. Otherwise → general health check.
+app.post('/api/ats/scan', async (req, res) => {
+  try {
+    if (!state.resumePath) return res.status(400).json({ error: 'Upload your resume on the Profile page first' });
+    const { job } = req.body || {};
+    const result = await atsScan({
+      resumePath: state.resumePath,
+      profile: state.profile || {},
+      job
+    });
+    res.json(result);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
 // AI tailoring — POST { job } → { summary, coverLetter, keyPoints, matchScore, source }
