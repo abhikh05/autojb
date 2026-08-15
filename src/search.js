@@ -17,6 +17,9 @@ const APPLY_PLATFORMS = {
   smartrecruiters: { name: 'SmartRecruiters', applyMode: 'assisted', hosts: ['smartrecruiters.com'] },
   indeed:          { name: 'Indeed',          applyMode: 'assisted', hosts: ['indeed.com'] },
   linkedin:        { name: 'LinkedIn',        applyMode: 'assisted', hosts: ['linkedin.com'] },
+  naukri:          { name: 'Naukri',          applyMode: 'assisted', hosts: ['naukri.com'] },
+  foundit:         { name: 'Foundit',         applyMode: 'assisted', hosts: ['foundit.in', 'foundit.com'] },
+  wellfound:       { name: 'Wellfound',       applyMode: 'assisted', hosts: ['wellfound.com', 'angel.co'] },
   remotive:        { name: 'Remotive',        applyMode: 'manual',   hosts: ['remotive.com'] },
   remoteok:        { name: 'RemoteOK',        applyMode: 'manual',   hosts: ['remoteok.com'] },
   arbeitnow:       { name: 'Arbeitnow',       applyMode: 'manual',   hosts: ['arbeitnow.com'] },
@@ -40,21 +43,23 @@ async function search({ keywords = '', location = '', remote = false, limit = 30
   if (!kw) return { jobs: [], sources: {}, error: 'Enter a keyword to search' };
 
   const started = Date.now();
-  const [remotive, remoteok, arbeitnow, jobicy, himalayas, wwr, linkedin] = await Promise.all([
+  const [remotive, remoteok, arbeitnow, jobicy, himalayas, wwr, linkedin, foundit] = await Promise.all([
     fromRemotive(kw).catch(e => { console.warn('[Remotive]', e.message); return []; }),
     fromRemoteOK(kw).catch(e => { console.warn('[RemoteOK]', e.message); return []; }),
     fromArbeitnow(kw).catch(e => { console.warn('[Arbeitnow]', e.message); return []; }),
     fromJobicy(kw).catch(e => { console.warn('[Jobicy]', e.message); return []; }),
     fromHimalayas(kw).catch(e => { console.warn('[Himalayas]', e.message); return []; }),
     fromWWR(kw).catch(e => { console.warn('[WWR]', e.message); return []; }),
-    fromLinkedIn(kw, location, remote).catch(e => { console.warn('[LinkedIn]', e.message); return []; })
+    fromLinkedIn(kw, location, remote).catch(e => { console.warn('[LinkedIn]', e.message); return []; }),
+    fromFoundit(kw).catch(e => { console.warn('[Foundit]', e.message); return []; })
   ]);
 
   const sources = {
     remotive: remotive.length, remoteok: remoteok.length, arbeitnow: arbeitnow.length,
-    jobicy: jobicy.length, himalayas: himalayas.length, wwr: wwr.length, linkedin: linkedin.length
+    jobicy: jobicy.length, himalayas: himalayas.length, wwr: wwr.length,
+    linkedin: linkedin.length, foundit: foundit.length
   };
-  const all = [...remotive, ...remoteok, ...arbeitnow, ...jobicy, ...himalayas, ...wwr, ...linkedin];
+  const all = [...remotive, ...remoteok, ...arbeitnow, ...jobicy, ...himalayas, ...wwr, ...linkedin, ...foundit];
 
   // Dedupe by (company + title)
   const seen = new Set();
@@ -254,6 +259,35 @@ async function fetchLinkedInPage(kw, location, remoteOnly, start) {
   });
 
   return jobs;
+}
+
+// ── Foundit (India / MENA / SEA) — public middleware API ────
+async function fromFoundit(kw) {
+  const url = `https://www.foundit.in/middleware/jobsearch?searchType=personalizedSearch&query=${encodeURIComponent(kw)}&limit=25&sort=1&pageNum=1`;
+  const r = await axios.get(url, {
+    timeout: 15000,
+    headers: {
+      'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/126.0.0.0 Safari/537.36',
+      'Accept': 'application/json',
+      'Referer': 'https://www.foundit.in/srp/results'
+    }
+  });
+  const rows = r.data?.jobSearchResponse?.data || [];
+  return rows.map(j => ({
+    title: j.title || 'Untitled',
+    company: j.companyName || j.recruiterCompanyName || 'Unknown',
+    location: j.locations || 'India',
+    remote: /remote|work from home|wfh/i.test((j.title || '') + ' ' + (j.locations || '')),
+    salary: (j.minimumSalary?.absoluteValue && j.maximumSalary?.absoluteValue)
+      ? `₹${Math.round(j.minimumSalary.absoluteValue / 100000)}-${Math.round(j.maximumSalary.absoluteValue / 100000)} LPA`
+      : null,
+    posted: j.updatedAt || 'Recently',
+    postedAt: j.createdAt || Date.now(),
+    description: cleanText(j.jobDescription || j.description || j.skills || '').slice(0, 400),
+    applyUrl: j.redirectUrl || (j.jobId ? `https://www.foundit.in/job/${j.jobId}` : ''),
+    tags: (j.skills || '').split(',').map(s => s.trim()).filter(Boolean).slice(0, 6),
+    source: 'foundit'
+  }));
 }
 
 async function fromJobicy(kw) {

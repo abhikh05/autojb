@@ -197,6 +197,77 @@ app.post('/api/ats/scan', async (req, res) => {
   }
 });
 
+// Generate a cover letter for one job. Reuses the tailor engine but returns a longer letter.
+app.post('/api/cover-letter', async (req, res) => {
+  try {
+    const { job } = req.body || {};
+    if (!job?.title) return res.status(400).json({ error: 'job required' });
+    const useProfile = state.profile || {};
+    const OpenAI = require('openai');
+    const key = readSecret('openaiKey') || process.env.OPENAI_API_KEY;
+    if (!key) {
+      // Template fallback
+      const letter = `Hi ${job.company || 'team'},\n\nI came across the ${job.title} role and it looks like a strong fit.\n\n${useProfile.bio || `My background is in ${useProfile.keywords || 'the areas your posting calls out'}.`}\n\nI'd love to talk. My resume is attached.\n\nBest,\n${useProfile.name || ''}`;
+      return res.json({ letter, source: 'template' });
+    }
+    const client = new OpenAI({ apiKey: key });
+    const msg = await client.chat.completions.create({
+      model: 'gpt-4o-mini',
+      max_tokens: 600,
+      messages: [
+        { role: 'system', content: 'Write a warm, concise 4-paragraph cover letter in first person. Reference specific things from the JD. Never invent experience.' },
+        { role: 'user', content: JSON.stringify({
+            job: { title: job.title, company: job.company, description: (job.description || '').slice(0, 1500) },
+            profile: { name: useProfile.name, title: useProfile.title, keywords: useProfile.keywords, bio: useProfile.bio || '' }
+        }) }
+      ]
+    });
+    res.json({ letter: msg.choices[0].message.content.trim(), source: 'openai' });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Generate a warm outreach email for jobs where the JD includes a contact email.
+app.post('/api/email-draft', async (req, res) => {
+  try {
+    const { job } = req.body || {};
+    if (!job?.title) return res.status(400).json({ error: 'job required' });
+    const email = extractEmailFromText(job.description || '');
+    if (!email) return res.json({ ok: false, reason: 'No email address found in the job description' });
+
+    const useProfile = state.profile || {};
+    const OpenAI = require('openai');
+    const key = readSecret('openaiKey') || process.env.OPENAI_API_KEY;
+
+    const subjectDefault = `Application: ${job.title} — ${useProfile.name || 'Candidate'}`;
+    if (!key) {
+      const body = `Hi,\n\nI'm interested in the ${job.title} role at ${job.company}. ${useProfile.bio || ''}\n\nI've attached my resume — happy to jump on a call whenever works.\n\nBest,\n${useProfile.name || ''}`;
+      return res.json({ ok: true, to: email, subject: subjectDefault, body, source: 'template' });
+    }
+
+    const client = new OpenAI({ apiKey: key });
+    const msg = await client.chat.completions.create({
+      model: 'gpt-4o-mini',
+      max_tokens: 500,
+      response_format: { type: 'json_object' },
+      messages: [
+        { role: 'system', content: 'You draft warm, short cold-outreach emails for job applications. Return JSON { subject, body }. Body should be 3 short paragraphs, first person, no exclamation marks, mention resume is attached.' },
+        { role: 'user', content: JSON.stringify({
+            to: email,
+            job: { title: job.title, company: job.company, description: (job.description || '').slice(0, 1000) },
+            profile: { name: useProfile.name, title: useProfile.title, bio: useProfile.bio || '', keywords: useProfile.keywords }
+        }) }
+      ]
+    });
+    const parsed = JSON.parse(msg.choices[0].message.content);
+    res.json({ ok: true, to: email, subject: parsed.subject || subjectDefault, body: parsed.body || '', source: 'openai' });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+function extractEmailFromText(text) {
+  const m = String(text || '').match(/[\w.+-]+@[\w-]+\.[a-zA-Z]{2,}/);
+  return m ? m[0] : null;
+}
+
 // AI tailoring — POST { job } → { summary, coverLetter, keyPoints, matchScore, source }
 app.post('/api/tailor', async (req, res) => {
   try {

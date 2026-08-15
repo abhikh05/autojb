@@ -7,9 +7,11 @@ import { useEffect, useMemo, useState } from 'react';
 import { PageHeader } from '@/components/PageHeader';
 import { TailorModal } from '@/components/TailorModal';
 import { AtsScanModal } from '@/components/AtsScanModal';
+import { CoverLetterModal } from '@/components/CoverLetterModal';
 import {
   Search as SearchIcon, MapPin, Bot, ExternalLink, Loader2, Sparkles,
-  Zap, ArrowUpDown, Check, X, Star, Play, AlertTriangle, FileText, ScanSearch
+  Zap, ArrowUpDown, Check, X, Star, Play, AlertTriangle, FileText, ScanSearch,
+  Mail, PenLine
 } from 'lucide-react';
 
 // ── Types ────────────────────────────────────────────────────
@@ -51,6 +53,8 @@ export default function SearchPage() {
   const [applied, setApplied] = useState<Record<string, boolean>>({});
   const [tailorJob, setTailorJob] = useState<Job | null>(null);
   const [atsJob, setAtsJob] = useState<Job | null | 'health'>(null);
+  const [coverJob, setCoverJob] = useState<Job | null>(null);
+  const [emailJob, setEmailJob] = useState<Job | null>(null);
 
   // Load persistent library from backend on mount.
   useEffect(() => {
@@ -353,6 +357,8 @@ export default function SearchPage() {
               onStar={() => toggleStar(job)}
               onTailor={() => setTailorJob(job)}
               onScan={() => setAtsJob(job)}
+              onCoverLetter={() => setCoverJob(job)}
+              onEmail={() => setEmailJob(job)}
             />
           );
         })}
@@ -368,15 +374,24 @@ export default function SearchPage() {
           onClose={() => setAtsJob(null)}
         />
       )}
+
+      {coverJob && (
+        <CoverLetterModal job={coverJob} mode="cover" onClose={() => setCoverJob(null)} />
+      )}
+      {emailJob && (
+        <CoverLetterModal job={emailJob} mode="email" onClose={() => setEmailJob(null)} />
+      )}
     </div>
   );
 }
 
 // ── Job row ──────────────────────────────────────────────────
-function JobRow({ job, applying, applied, starred, onApply, onStar, onTailor, onScan }: {
+function JobRow({ job, applying, applied, starred, onApply, onStar, onTailor, onScan, onCoverLetter, onEmail }: {
   job: Job; applying: boolean; applied: boolean; starred: boolean;
   onApply: () => void; onStar: () => void; onTailor: () => void; onScan: () => void;
+  onCoverLetter: () => void; onEmail: () => void;
 }) {
+  const hasEmail = /[\w.+-]+@[\w-]+\.[a-zA-Z]{2,}/.test(job.description || '');
   const mode = job.platform.applyMode;
   const modePill =
     mode === 'auto'     ? { cls: 'pill-neon',   Icon: Bot,          label: 'AUTO-APPLY' } :
@@ -434,11 +449,19 @@ function JobRow({ job, applying, applied, starred, onApply, onStar, onTailor, on
               <ExternalLink className="w-3.5 h-3.5" /> Apply on site
             </button>
           )}
-          <div className="flex items-center gap-1">
+          <div className="flex items-center gap-1 flex-wrap justify-end">
             <button className="btn btn-sm btn-ghost" onClick={onScan} title="ATS scan — score your resume against this job">
               <ScanSearch className="w-3.5 h-3.5 text-neon" />
             </button>
-            <button className="btn btn-sm btn-ghost" onClick={onTailor} title="AI tailor for this job">
+            <button className="btn btn-sm btn-ghost" onClick={onCoverLetter} title="Generate cover letter for this job">
+              <PenLine className="w-3.5 h-3.5 text-cyan-400" />
+            </button>
+            {hasEmail && (
+              <button className="btn btn-sm btn-ghost" onClick={onEmail} title="Draft outreach email (JD contains contact email)">
+                <Mail className="w-3.5 h-3.5 text-amber" />
+              </button>
+            )}
+            <button className="btn btn-sm btn-ghost" onClick={onTailor} title="AI tailor summary">
               <FileText className="w-3.5 h-3.5 text-violet-400" />
             </button>
             <button className="btn btn-sm btn-ghost" onClick={onStar} title="Star">
